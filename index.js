@@ -59,7 +59,7 @@ async function run() {
     const events = db.collection("events");
 
     console.log(" MongoDB connected successfully!");
-    
+
     app.post("/api/user", verifyFirebaseToken, async (req, res) => {
   const { name, email } = req.body;
   const firebaseEmail = req.user.email;
@@ -93,6 +93,24 @@ async function run() {
     res.status(500).json({ message: "Error creating user" });
   }
        });
+
+// get current user information
+  app.get("/api/user/:email", async (req, res) => {
+    try {
+      const email = req.params.email;
+
+      const user = await users.findOne({ email });
+
+      if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json(user);
+  } catch (error) {
+    console.error("Error fetching user:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
     // Get all challenges
     app.get("/api/challenges", async (req, res) => {
       const filter = req.query.category ? { category: req.query.category } : {};
@@ -140,7 +158,7 @@ async function run() {
     app.post("/api/challenges/join/:id", async (req, res) => {
       const challengeId = req.params.id;
       const { userId } = req.body;
-
+       console.log(userId)
       // participants +1
       await challenges.updateOne(
         { _id: new ObjectId(challengeId) },
