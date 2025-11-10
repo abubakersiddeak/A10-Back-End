@@ -219,12 +219,37 @@ async function run() {
       res.json(result);
     });
 
-    app.get("/api/user-challenges/:userId", async (req, res) => {
-      const userId = req.params.userId;
-      const result = await userChallenges.find({ userId }).toArray();
-      res.json(result);
-    });
+  
+app.get("/api/user-challenges/:userId", async (req, res) => {
+  try {
+    const userId = req.params.userId;
 
+    //  userChallenges fetch
+    const userChallengesData = await userChallenges
+      .find({ userId })
+      .toArray();
+
+    // challenge details fetch
+    const challengesDetails = await Promise.all(
+      userChallengesData.map(async (uc) => {
+        const challengeData = await challenges.findOne({
+          _id: new ObjectId(uc.challengeId),
+        });
+
+        return {
+          ...uc,
+          challenge: challengeData || null,
+        };
+      })
+    );
+
+    res.json(challengesDetails);
+    console.log(challengesDetails)
+  } catch (error) {
+    console.error("Error fetching user challenges with details:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
     app.get("/", (req, res) => {
       res.send(" EcoTrack API is running successfully!");
     });
