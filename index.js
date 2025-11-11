@@ -3,15 +3,15 @@ import express from "express";
 import cors from "cors";
 import { MongoClient, ObjectId, ServerApiVersion } from "mongodb";
 import admin from "firebase-admin";
-import serviceAccount from "./firebase-adminsdk.json"with { type: "json" };
+import serviceAccount from "./firebase-adminsdk.json" with { type: "json" };
 
 dotenv.config();
 const app = express();
 const port = process.env.PORT || 4000;
 
-// firebase 
+// firebase
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(serviceAccount),
 });
 
 // --- Middleware ---
@@ -20,6 +20,7 @@ app.use(express.json());
 
 //  Middleware for Firebase Token Verification
 async function verifyFirebaseToken(req, res, next) {
+  console.log("hit verifyFirebase Middleware");
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
     return res.status(401).json({ message: "Unauthorized - Missing Token" });
@@ -61,56 +62,56 @@ async function run() {
     console.log(" MongoDB connected successfully!");
 
     app.post("/api/user", verifyFirebaseToken, async (req, res) => {
-  const { name, email } = req.body;
-  const firebaseEmail = req.user.email;
-  if (email !== firebaseEmail) {
-    return res.status(403).json({ message: "Email mismatch" });
-  }
+      const { name, email } = req.body;
+      const firebaseEmail = req.user.email;
+      if (email !== firebaseEmail) {
+        return res.status(403).json({ message: "Email mismatch" });
+      }
 
-  try {
-    const existing = await users.findOne({ email });
+      try {
+        const existing = await users.findOne({ email });
 
-    if (existing) {
-      // update user lastLogin or name
-      await users.updateOne(
-        { email },
-        { $set: { name, lastLogin: new Date() } }
-      );
-      return res.status(200).json({ message: "User updated" });
-    }
+        if (existing) {
+          // update user lastLogin or name
+          await users.updateOne(
+            { email },
+            { $set: { name, lastLogin: new Date() } }
+          );
+          return res.status(200).json({ message: "User updated" });
+        }
 
-    // create new user
-    await users.insertOne({
-      name,
-      email,
-      createdAt: new Date(),
-      lastLogin: new Date(),
+        // create new user
+        await users.insertOne({
+          name,
+          email,
+          createdAt: new Date(),
+          lastLogin: new Date(),
+        });
+
+        res.status(201).json({ message: "User created successfully" });
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Error creating user" });
+      }
     });
 
-    res.status(201).json({ message: "User created successfully" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Error creating user" });
-  }
-       });
+    // get current user information
+    app.get("/api/user/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
 
-// get current user information
-  app.get("/api/user/:email", async (req, res) => {
-    try {
-      const email = req.params.email;
+        const user = await users.findOne({ email });
 
-      const user = await users.findOne({ email });
+        if (!user) {
+          return res.status(404).json({ message: "User not found" });
+        }
 
-      if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    res.json(user);
-  } catch (error) {
-    console.error("Error fetching user:", error);
-    res.status(500).json({ message: "Server error" });
-  }
-});
+        res.json(user);
+      } catch (error) {
+        console.error("Error fetching user:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
     // Get all challenges
     app.get("/api/challenges", async (req, res) => {
       const filter = req.query.category ? { category: req.query.category } : {};
@@ -158,7 +159,7 @@ async function run() {
     app.post("/api/challenges/join/:id", async (req, res) => {
       const challengeId = req.params.id;
       const { userId } = req.body;
-       console.log(userId)
+      console.log(userId);
       // participants +1
       await challenges.updateOne(
         { _id: new ObjectId(challengeId) },
@@ -182,14 +183,127 @@ async function run() {
       const result = await tips.find().toArray();
       res.json(result);
     });
+    app.get("/api/tips/:author", verifyFirebaseToken, async (req, res) => {
+      try {
+        const author = req.params.author;
+        console.log("User DB ID:", author);
 
-    app.post("/api/tips", async (req, res) => {
+        const result = await tips.find({ author: author }).toArray();
+
+        res.status(200).json(result);
+      } catch (error) {
+        console.error("Error fetching tips:", error);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
+
+    app.post("/api/tips", verifyFirebaseToken, async (req, res) => {
       const data = req.body;
       data.createdAt = new Date();
       const result = await tips.insertOne(data);
       res.json(result);
     });
+    app.put("/api/tips/:id", verifyFirebaseToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { title, category, content } = req.body;
 
+        if (!title || !category || !content) {
+          return res.status(400).json({ message: "All fields are required" });
+        }
+
+        const result = await tips.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              title,
+              category,
+              content,
+            },
+          }
+        );
+
+        if (result.modifiedCount === 0) {
+          return res
+            .status(404)
+            .json({ message: "Tip not found or unchanged" });
+        }
+
+        res.json({ message: "Tip updated successfully!" });
+      } catch (error) {
+        console.error("PUT /api/tips/:id error:", error);
+        res.status(500).json({ message: "Server error during update" });
+      }
+    });
+    //  Upvote a tip
+    app.put("/api/tips/:id/upvote", verifyFirebaseToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const userEmail = req.user.email;
+
+        const tip = await tips.findOne({ _id: new ObjectId(id) });
+        if (!tip) {
+          return res.status(404).json({ message: "Tip not found" });
+        }
+
+        // নিজের পোস্টে ভোট দেওয়া বন্ধ
+        if (tip.author === userEmail) {
+          return res
+            .status(400)
+            .json({ message: "You can't upvote your own tip" });
+        }
+
+        // 🔍 upvotedUsers ফিল্ড না থাকলে initialize করে দাও
+        if (!Array.isArray(tip.upvotedUsers)) {
+          tip.upvotedUsers = [];
+        }
+
+        const alreadyVoted = tip.upvotedUsers.includes(userEmail);
+
+        if (alreadyVoted) {
+          // 🟡 যদি আগে ভোট দিয়ে থাকে → Vote cancel
+          await tips.updateOne(
+            { _id: new ObjectId(id) },
+            {
+              $inc: { upvotes: -1 },
+              $pull: { upvotedUsers: userEmail },
+            }
+          );
+          return res.json({ message: "Vote removed", voted: false });
+        } else {
+          await tips.updateOne(
+            { _id: new ObjectId(id) },
+            {
+              $inc: { upvotes: 1 },
+              $addToSet: { upvotedUsers: userEmail },
+            }
+          );
+          return res.json({ message: "Voted successfully", voted: true });
+        }
+      } catch (error) {
+        console.error("PUT /api/tips/:id/upvote error:", error);
+        res.status(500).json({ message: "Server error during upvote" });
+      }
+    });
+
+    app.delete("/api/tips/:id", verifyFirebaseToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        console.log(id);
+        const result = await tips.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ message: "Tip not found" });
+        }
+
+        res.json({ message: "Tip deleted successfully!" });
+      } catch (error) {
+        console.error("DELETE /api/tips/:id error:", error);
+        res.status(500).json({ message: "Server error during deletion" });
+      }
+    });
     // Upvote a tip
     app.post("/api/tips/upvote", async (req, res) => {
       const { title } = req.body;
@@ -219,37 +333,36 @@ async function run() {
       res.json(result);
     });
 
-  
-app.get("/api/user-challenges/:userId", async (req, res) => {
-  try {
-    const userId = req.params.userId;
+    app.get("/api/user-challenges/:userId", async (req, res) => {
+      try {
+        const userId = req.params.userId;
 
-    //  userChallenges fetch
-    const userChallengesData = await userChallenges
-      .find({ userId })
-      .toArray();
+        //  userChallenges fetch
+        const userChallengesData = await userChallenges
+          .find({ userId })
+          .toArray();
 
-    // challenge details fetch
-    const challengesDetails = await Promise.all(
-      userChallengesData.map(async (uc) => {
-        const challengeData = await challenges.findOne({
-          _id: new ObjectId(uc.challengeId),
-        });
+        // challenge details fetch
+        const challengesDetails = await Promise.all(
+          userChallengesData.map(async (uc) => {
+            const challengeData = await challenges.findOne({
+              _id: new ObjectId(uc.challengeId),
+            });
 
-        return {
-          ...uc,
-          challenge: challengeData || null,
-        };
-      })
-    );
+            return {
+              ...uc,
+              challenge: challengeData || null,
+            };
+          })
+        );
 
-    res.json(challengesDetails);
-    console.log(challengesDetails)
-  } catch (error) {
-    console.error("Error fetching user challenges with details:", error);
-    res.status(500).json({ message: "Server error" });
-  }
-});
+        res.json(challengesDetails);
+        console.log(challengesDetails);
+      } catch (error) {
+        console.error("Error fetching user challenges with details:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
     app.get("/", (req, res) => {
       res.send(" EcoTrack API is running successfully!");
     });
