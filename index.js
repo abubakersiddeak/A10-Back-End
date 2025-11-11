@@ -29,7 +29,8 @@ async function verifyFirebaseToken(req, res, next) {
   const token = authHeader.split(" ")[1];
   try {
     const decoded = await admin.auth().verifyIdToken(token);
-    req.user = decoded; // user info stored in request
+    req.user = decoded;
+
     next();
   } catch (error) {
     console.error("Token verification failed:", error);
@@ -118,6 +119,39 @@ async function run() {
       const result = await challenges.find(filter).toArray();
       res.json(result);
     });
+    // GET upcoming challenges
+    app.get("/api/challenges/upcoming", async (req, res) => {
+      try {
+        const now = new Date().toISOString().split("T")[0];
+
+        const upcomingChallenges = await challenges
+          .find({ startDate: { $gt: now } })
+          .sort({ startDate: 1 })
+          .toArray();
+
+        res.status(200).json(upcomingChallenges);
+      } catch (err) {
+        console.error("Error fetching upcoming challenges:", err);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+
+    // get running challenges
+    app.get("/api/challenges/running", async (req, res) => {
+      try {
+        const today = new Date();
+        const allChallenges = await challenges.find({}).toArray();
+        const runningChallenges = allChallenges.filter((c) => {
+          const start = new Date(c.startDate);
+          const end = new Date(c.endDate);
+          return start <= today && end >= today;
+        });
+        res.status(200).json(runningChallenges);
+      } catch (err) {
+        console.error("Error fetching running challenges:", err);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
 
     // Get single challenge by id
     app.get("/api/challenges/:id", async (req, res) => {
@@ -131,7 +165,6 @@ async function run() {
       const data = req.body;
       data.createdAt = new Date();
       data.updatedAt = new Date();
-      data.startDate = new Date();
       const result = await challenges.insertOne(data);
       res.json(result);
     });
@@ -179,6 +212,7 @@ async function run() {
       res.json({ message: "Joined successfully!", result });
     });
 
+    // tips apis
     app.get("/api/tips", async (req, res) => {
       const result = await tips.find().toArray();
       res.json(result);
@@ -310,14 +344,31 @@ async function run() {
       const result = await tips.updateOne({ title }, { $inc: { upvotes: 1 } });
       res.json(result);
     });
-
+    // Event get
     app.get("/api/events", async (req, res) => {
       const result = await events.find().toArray();
       res.json(result);
     });
+    // Event upcomming  get
+    app.get("/api/events/upcomming", async (req, res) => {
+      try {
+        const now = new Date().toISOString().split("T")[0];
 
-    app.post("/api/events", async (req, res) => {
+        const upcomingEvent = await events
+          .find({ date: { $gt: now } })
+          .sort({ date: 1 })
+          .toArray();
+
+        res.status(200).json(upcomingEvent);
+      } catch (err) {
+        console.error("Error fetching upcoming challenges:", err);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+    app.post("/api/events", verifyFirebaseToken, async (req, res) => {
       const data = req.body;
+      const authorEmail = req.user?.email;
+      data.organizer = authorEmail;
       data.createdAt = new Date();
       const result = await events.insertOne(data);
       res.json(result);
