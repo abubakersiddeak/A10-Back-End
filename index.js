@@ -94,7 +94,7 @@ async function run() {
         console.error(err);
         res.status(500).json({ message: "Error creating user" });
       }
-    });
+    }); // in use
 
     // get current user information
     app.get("/api/user/:email", async (req, res) => {
@@ -112,13 +112,16 @@ async function run() {
         console.error("Error fetching user:", error);
         res.status(500).json({ message: "Server error" });
       }
-    });
+    }); // in use
     // Get all challenges
     app.get("/api/challenges", async (req, res) => {
       const filter = req.query.category ? { category: req.query.category } : {};
-      const result = await challenges.find(filter).toArray();
+      const result = await challenges
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .toArray();
       res.json(result);
-    });
+    }); // in use
     // GET upcoming challenges
     app.get("/api/challenges/upcoming", async (req, res) => {
       try {
@@ -151,14 +154,14 @@ async function run() {
         console.error("Error fetching running challenges:", err);
         res.status(500).json({ message: "Server error" });
       }
-    });
+    }); // in use
 
     // Get single challenge by id
     app.get("/api/challenges/:id", async (req, res) => {
       const id = req.params.id;
       const result = await challenges.findOne({ _id: new ObjectId(id) });
       res.json(result);
-    });
+    }); // in use
 
     // Create new challenge
     app.post("/api/challenges", verifyFirebaseToken, async (req, res) => {
@@ -167,7 +170,7 @@ async function run() {
       data.updatedAt = new Date();
       const result = await challenges.insertOne(data);
       res.json(result);
-    });
+    }); // in use
 
     // Update a challenge
     app.patch("/api/challenges/:id", async (req, res) => {
@@ -182,7 +185,7 @@ async function run() {
     });
 
     // Delete a challenge
-    app.delete("/api/challenges/:id", async (req, res) => {
+    app.delete("/api/challenges/:id", verifyFirebaseToken, async (req, res) => {
       const id = req.params.id;
       const result = await challenges.deleteOne({ _id: new ObjectId(id) });
       res.json(result);
@@ -222,17 +225,16 @@ async function run() {
 
         res.json({ message: "Joined successfully!", result });
       }
-    );
+    ); // in use
 
     // tips apis
     app.get("/api/tips", async (req, res) => {
       const result = await tips.find().toArray();
       res.json(result);
-    });
+    }); //in use
     app.get("/api/tips/:author", verifyFirebaseToken, async (req, res) => {
       try {
         const author = req.params.author;
-        console.log("User DB ID:", author);
 
         const result = await tips.find({ author: author }).toArray();
 
@@ -241,14 +243,15 @@ async function run() {
         console.error("Error fetching tips:", error);
         res.status(500).json({ message: "Internal server error" });
       }
-    });
+    }); // in use
 
     app.post("/api/tips", verifyFirebaseToken, async (req, res) => {
+      console.log("hit tip post ");
       const data = req.body;
       data.createdAt = new Date();
       const result = await tips.insertOne(data);
       res.json(result);
-    });
+    }); // in use
     app.put("/api/tips/:id", verifyFirebaseToken, async (req, res) => {
       try {
         const id = req.params.id;
@@ -330,7 +333,7 @@ async function run() {
         console.error("PUT /api/tips/:id/upvote error:", error);
         res.status(500).json({ message: "Server error during upvote" });
       }
-    });
+    }); // in use
 
     app.delete("/api/tips/:id", verifyFirebaseToken, async (req, res) => {
       try {
@@ -349,18 +352,14 @@ async function run() {
         console.error("DELETE /api/tips/:id error:", error);
         res.status(500).json({ message: "Server error during deletion" });
       }
-    });
+    }); //in use
     // Upvote a tip
-    app.post("/api/tips/upvote", async (req, res) => {
-      const { title } = req.body;
-      const result = await tips.updateOne({ title }, { $inc: { upvotes: 1 } });
-      res.json(result);
-    });
+
     // Event get
     app.get("/api/events", async (req, res) => {
       const result = await events.find().toArray();
       res.json(result);
-    });
+    }); //in use
     // Event upcomming  get
     app.get("/api/events/upcomming", async (req, res) => {
       try {
@@ -376,7 +375,7 @@ async function run() {
         console.error("Error fetching upcoming challenges:", err);
         res.status(500).json({ message: "Server error" });
       }
-    });
+    }); //in use
     app.post("/api/events", verifyFirebaseToken, async (req, res) => {
       const data = req.body;
       const authorEmail = req.user?.email;
@@ -384,7 +383,7 @@ async function run() {
       data.createdAt = new Date();
       const result = await events.insertOne(data);
       res.json(result);
-    });
+    }); //in use
     app.get("/api/total-joined", async (req, res) => {
       try {
         const totalJoins = await userChallenges.countDocuments({});
@@ -393,7 +392,7 @@ async function run() {
         console.error("Error fetching total joined challenges:", error);
         res.status(500).json({ message: "Server error" });
       }
-    });
+    }); //in use
     // Join Event
     app.post("/api/events/join/:id", async (req, res) => {
       const id = req.params.id;
