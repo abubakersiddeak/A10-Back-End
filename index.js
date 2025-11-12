@@ -161,7 +161,7 @@ async function run() {
     });
 
     // Create new challenge
-    app.post("/api/challenges", async (req, res) => {
+    app.post("/api/challenges", verifyFirebaseToken, async (req, res) => {
       const data = req.body;
       data.createdAt = new Date();
       data.updatedAt = new Date();
@@ -189,28 +189,40 @@ async function run() {
     });
 
     // Join challenge (increments participants + adds to UserChallenges)
-    app.post("/api/challenges/join/:id", async (req, res) => {
-      const challengeId = req.params.id;
-      const { userId } = req.body;
-      console.log(userId);
-      // participants +1
-      await challenges.updateOne(
-        { _id: new ObjectId(challengeId) },
-        { $inc: { participants: 1 } }
-      );
+    app.post(
+      "/api/challenges/join/:id",
+      verifyFirebaseToken,
+      async (req, res) => {
+        const authorEmail = req.user?.email;
+        const challengeId = req.params.id;
+        const { userId } = req.body;
+        console.log(userId);
+        // participants +1
+        await challenges.updateOne(
+          { _id: new ObjectId(challengeId) },
+          { $inc: { participants: 1 } }
+        );
+        const challenge = await db
+          .collection("challenges")
+          .findOne({ _id: new ObjectId(challengeId) });
+        // add to userChallenges collection
+        const userChallenge = {
+          email: authorEmail,
+          userId,
+          challengeId: new ObjectId(challengeId),
+          status: "Not Started",
+          progress: 0,
+          actionsCompleted: 0,
+          totalActions: challenge.totalActions || 0,
+          co2Saved: 0,
+          plasticReduced: 0,
+          joinDate: new Date(),
+        };
+        const result = await userChallenges.insertOne(userChallenge);
 
-      // add to userChallenges collection
-      const userChallenge = {
-        userId,
-        challengeId: new ObjectId(challengeId),
-        status: "Not Started",
-        progress: 0,
-        joinDate: new Date(),
-      };
-      const result = await userChallenges.insertOne(userChallenge);
-
-      res.json({ message: "Joined successfully!", result });
-    });
+        res.json({ message: "Joined successfully!", result });
+      }
+    );
 
     // tips apis
     app.get("/api/tips", async (req, res) => {
@@ -373,7 +385,15 @@ async function run() {
       const result = await events.insertOne(data);
       res.json(result);
     });
-
+    app.get("/api/total-joined", async (req, res) => {
+      try {
+        const totalJoins = await userChallenges.countDocuments({});
+        res.json({ totalJoined: totalJoins });
+      } catch (error) {
+        console.error("Error fetching total joined challenges:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
     // Join Event
     app.post("/api/events/join/:id", async (req, res) => {
       const id = req.params.id;
@@ -414,6 +434,93 @@ async function run() {
         res.status(500).json({ message: "Server error" });
       }
     });
+
+    // Update user challenge progress
+    app.patch(
+      "/api/user-challenges/update/:id",
+      verifyFirebaseToken,
+      async (req, res) => {
+        try {
+          const id = req.params.id;
+          const {
+            actionsCompleted,
+            totalActions,
+            co2PerAction,
+            plasticPerAction,
+          } = req.body;
+
+          // find current data
+          const existing = await userChallenges.findOne({
+            _id: new ObjectId(id),
+          });
+          if (!existing) {
+            return res
+              .status(404)
+              .json({ message: "User challenge not found" });
+          }
+
+          // calculate new progress and impact
+          const newActionsCompleted =
+            existing.actionsCompleted + (actionsCompleted || 0);
+          const newProgress = Math.min(
+            (newActionsCompleted / (totalActions || existing.totalActions)) *
+              100,
+            100
+          );
+          const newCo2Saved = existing.co2Saved + (co2PerAction || 0);
+          const newPlasticReduced =
+            existing.plasticReduced + (plasticPerAction || 0);
+
+          // update data
+          const result = await userChallenges.updateOne(
+            { _id: new ObjectId(id) },
+            {
+              $set: {
+                progress: newProgress,
+                actionsCompleted: newActionsCompleted,
+                co2Saved: newCo2Saved,
+                plasticReduced: newPlasticReduced,
+                status: newProgress === 100 ? "Completed" : "In Progress",
+                lastUpdated: new Date(),
+              },
+            }
+          );
+
+          res.json({ message: "Progress updated successfully", result });
+        } catch (error) {
+          console.error("Error updating progress:", error);
+          res.status(500).json({ message: "Server error" });
+        }
+      }
+    );
+    // Get live statistics (total CO2 saved and plastic reduced)
+    app.get("/api/statistics", async (req, res) => {
+      try {
+        const stats = await userChallenges
+          .aggregate([
+            {
+              $group: {
+                _id: null,
+                totalCO2: { $sum: "$co2Saved" },
+                totalPlastic: { $sum: "$plasticReduced" },
+              },
+            },
+          ])
+          .toArray();
+
+        const result = stats[0] || { totalCO2: 0, totalPlastic: 0 };
+
+        res.json({
+          message: "Live statistics fetched successfully",
+          totalCO2: result.totalCO2,
+          totalPlastic: result.totalPlastic,
+        });
+      } catch (error) {
+        console.error("Error fetching statistics:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+
     app.get("/", (req, res) => {
       res.send(" EcoTrack API is running successfully!");
     });
