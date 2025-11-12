@@ -59,6 +59,7 @@ async function run() {
     const userChallenges = db.collection("userChallenges");
     const tips = db.collection("tips");
     const events = db.collection("events");
+    const livestatics = db.collection("livestatics");
 
     console.log(" MongoDB connected successfully!");
 
@@ -122,6 +123,50 @@ async function run() {
         .toArray();
       res.json(result);
     }); // in use
+    // GET advacnce challenge filter
+    app.get("/api/challenges/filter", async (req, res) => {
+      try {
+        const {
+          categories, // "Waste Reduction,Energy Saving"
+          startDate, // "2024-01-01"
+          endDate, // "2024-12-31"
+          minParticipants, // 10
+          maxParticipants, // 1000
+        } = req.query;
+
+        const filter = {};
+
+        // Category filter
+        if (categories) {
+          filter.category = { $in: categories.split(",") };
+        }
+
+        // Date range filter
+        if (startDate || endDate) {
+          filter.startDate = {};
+          if (startDate) filter.startDate.$gte = new Date(startDate);
+          if (endDate) filter.startDate.$lte = new Date(endDate);
+        }
+
+        // Participants range filter
+        if (minParticipants || maxParticipants) {
+          filter.participants = {};
+          if (minParticipants)
+            filter.participants.$gte = parseInt(minParticipants);
+          if (maxParticipants)
+            filter.participants.$lte = parseInt(maxParticipants);
+        }
+
+        const result = await challenges
+          .find(filter)
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.json(result);
+      } catch (error) {
+        console.error("Error filtering challenges:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
     app.get("/api/challenges/top-participants", async (req, res) => {
       try {
         const topChallenges = await challenges
@@ -492,7 +537,7 @@ async function run() {
     // Get live statistics (total CO2 saved and plastic reduced)
     app.get("/api/statistics", async (req, res) => {
       try {
-        const stats = await userChallenges
+        const stats = await livestatics
           .aggregate([
             {
               $group: {
@@ -514,6 +559,56 @@ async function run() {
       } catch (error) {
         console.error("Error fetching statistics:", error);
         res.status(500).json({ message: "Server error" });
+      }
+    });
+    //  POST API — Finish a Challenge
+    app.post("/api/finish-challenge", async (req, res) => {
+      console.log("hit finsh");
+      try {
+        const { userId, challengeId, email } = req.body;
+
+        // Step 1: Find the user's challenge record
+        const userChallenge = await userChallenges.findOne({
+          userId,
+        });
+        if (!userChallenge) {
+          return res.status(404).json({ message: "User challenge not found!" });
+        }
+
+        // Step 2: Find the main challenge details
+        const challenge = await challenges.findOne({
+          _id: new ObjectId(challengeId),
+        });
+        if (!challenge) {
+          return res.status(404).json({ message: "Challenge not found!" });
+        }
+        console.log(challenge);
+        // Step 3: Save data in 'livestatics' collection
+        await livestatics.insertOne({
+          email,
+          userId,
+          challengeId,
+          challengeTitle: challenge.title,
+          category: challenge.category,
+          co2Saved: challenge.targetCO2 || 0, // যদি তোমার challenge model এ থাকে
+          plasticReduced: challenge.targetPlastic || 0,
+          finishedAt: new Date(),
+        });
+
+        // Step 4: Update userChallenge status
+        await userChallenges.updateOne(
+          { userId, challengeId },
+          { $set: { status: "completed", completedAt: new Date() } }
+        );
+
+        res
+          .status(200)
+          .json({ message: "Challenge marked as finished successfully!" });
+      } catch (error) {
+        console.error("Error finishing challenge:", error);
+        res
+          .status(500)
+          .json({ message: "Server error while finishing challenge" });
       }
     });
 
