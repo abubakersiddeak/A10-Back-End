@@ -122,23 +122,20 @@ async function run() {
         .toArray();
       res.json(result);
     }); // in use
-    // GET upcoming challenges
-    app.get("/api/challenges/upcoming", async (req, res) => {
+    app.get("/api/challenges/top-participants", async (req, res) => {
       try {
-        const now = new Date().toISOString().split("T")[0];
-
-        const upcomingChallenges = await challenges
-          .find({ startDate: { $gt: now } })
-          .sort({ startDate: 1 })
+        const topChallenges = await challenges
+          .find()
+          .sort({ participants: -1 }) // descending order
+          .limit(10)
           .toArray();
 
-        res.status(200).json(upcomingChallenges);
+        res.status(200).json(topChallenges);
       } catch (err) {
-        console.error("Error fetching upcoming challenges:", err);
+        console.error("Error fetching top challenges:", err);
         res.status(500).json({ message: "Server error" });
       }
-    });
-
+    }); //in use
     // get running challenges
     app.get("/api/challenges/running", async (req, res) => {
       try {
