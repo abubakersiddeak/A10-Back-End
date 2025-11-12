@@ -166,7 +166,7 @@ async function run() {
         console.error("Error filtering challenges:", error);
         res.status(500).json({ message: "Server error" });
       }
-    });
+    }); //in use
 
     app.get("/api/challenges/top-participants", async (req, res) => {
       try {
@@ -242,33 +242,56 @@ async function run() {
         const authorEmail = req.user?.email;
         const challengeId = req.params.id;
         const { userId } = req.body;
-        console.log(userId);
-        // participants +1
-        await challenges.updateOne(
-          { _id: new ObjectId(challengeId) },
-          { $inc: { participants: 1 } }
-        );
-        const challenge = await db
-          .collection("challenges")
-          .findOne({ _id: new ObjectId(challengeId) });
-        // add to userChallenges collection
-        const userChallenge = {
-          email: authorEmail,
-          userId,
-          challengeId: new ObjectId(challengeId),
-          status: "Not Started",
-          progress: 0,
-          actionsCompleted: 0,
-          totalActions: challenge.totalActions || 0,
-          co2Saved: 0,
-          plasticReduced: 0,
-          joinDate: new Date(),
-        };
-        const result = await userChallenges.insertOne(userChallenge);
 
-        res.json({ message: "Joined successfully!", result });
+        try {
+          const alreadyJoined = await userChallenges.findOne({
+            userId,
+            challengeId: new ObjectId(challengeId),
+          });
+
+          if (alreadyJoined) {
+            return res
+              .status(400)
+              .json({ message: "You have already joined this challenge!" });
+          }
+
+          const challenge = await challenges.findOne({
+            _id: new ObjectId(challengeId),
+          });
+
+          if (!challenge) {
+            return res.status(404).json({ message: "Challenge not found!" });
+          }
+
+          // participants +1
+          await challenges.updateOne(
+            { _id: new ObjectId(challengeId) },
+            { $inc: { participants: 1 } }
+          );
+
+          // নতুন user challenge ডকুমেন্ট তৈরি
+          const userChallenge = {
+            email: authorEmail,
+            userId,
+            challengeId: new ObjectId(challengeId),
+            status: "Not Started",
+            progress: 0,
+            completedSteps: [],
+            totalActions: Number(challenge?.totalActions) || 0,
+            joinDate: new Date(),
+            lastUpdated: new Date(),
+          };
+
+          const result = await userChallenges.insertOne(userChallenge);
+
+          res.json({ message: "Joined successfully!", result });
+        } catch (error) {
+          console.error("Join Challenge Error:", error);
+          res.status(500).json({ message: "Internal Server Error" });
+        }
       }
-    ); // in use
+    );
+    // in use
 
     // tips apis
     app.get("/api/tips", async (req, res) => {
