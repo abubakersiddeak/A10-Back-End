@@ -127,18 +127,18 @@ async function run() {
     app.get("/api/challenges/filter", async (req, res) => {
       try {
         const {
-          categories, // "Waste Reduction,Energy Saving"
-          startDate, // "2024-01-01"
-          endDate, // "2024-12-31"
-          minParticipants, // 10
-          maxParticipants, // 1000
+          categories,
+          startDate,
+          endDate,
+          minParticipants,
+          maxParticipants,
         } = req.query;
 
         const filter = {};
 
         // Category filter
         if (categories) {
-          filter.category = { $in: categories.split(",") };
+          filter.category = { $in: categories.split(",").map((c) => c.trim()) };
         }
 
         // Date range filter
@@ -167,6 +167,7 @@ async function run() {
         res.status(500).json({ message: "Server error" });
       }
     });
+
     app.get("/api/challenges/top-participants", async (req, res) => {
       try {
         const topChallenges = await challenges
