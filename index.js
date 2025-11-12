@@ -558,33 +558,88 @@ async function run() {
         }
       }
     );
-    // Get live statistics (total CO2 saved and plastic reduced)
-    app.get("/api/statistics", async (req, res) => {
+    app.patch(
+      "/api/user-challenges/:id/complete-step",
+      verifyFirebaseToken,
+      async (req, res) => {
+        const { id } = req.params;
+        const { stepId, co2PerAction = 0, plasticPerAction = 0 } = req.body;
+
+        try {
+          const uc = await userChallenges.findOne({ _id: new ObjectId(id) });
+          if (!uc)
+            return res
+              .status(404)
+              .json({ message: "User challenge not found" });
+
+          const completedSteps = Array.isArray(uc.completedSteps)
+            ? uc.completedSteps
+            : [];
+          if (completedSteps.includes(stepId)) {
+            return res.status(400).json({ message: "Step already completed" });
+          }
+
+          completedSteps.push(stepId);
+
+          const totalSteps = uc.totalActions || 1;
+          const newProgress = Math.min(
+            (completedSteps.length / totalSteps) * 100,
+            100
+          );
+          const newStatus = newProgress >= 100 ? "Completed" : "In Progress";
+
+          // Update user challenge
+          await userChallenges.updateOne(
+            { _id: new ObjectId(id) },
+            {
+              $set: {
+                completedSteps,
+                progress: newProgress,
+                status: newStatus,
+                lastUpdated: new Date(),
+              },
+              $inc: {
+                co2Saved: co2PerAction,
+                plasticReduced: plasticPerAction,
+              },
+            }
+          );
+
+          // If completed → insert to livestatics
+          if (newProgress >= 100) {
+            await livestatics.insertOne({
+              email: req.user.email,
+              userId: uc.userId,
+              challengeId: uc.challengeId,
+              challengeTitle: uc.challengeTitle,
+              category: uc.category,
+              finishedAt: new Date(),
+            });
+          }
+
+          const updated = await userChallenges.findOne({
+            _id: new ObjectId(id),
+          });
+          res.json(updated);
+        } catch (err) {
+          console.error(err);
+          res.status(500).json({ message: "Server error" });
+        }
+      }
+    );
+
+    // --- Live stats API ---
+    app.get("/api/liveStats", async (req, res) => {
       try {
         const stats = await livestatics
-          .aggregate([
-            {
-              $group: {
-                _id: null,
-                totalCO2: { $sum: "$co2Saved" },
-                totalPlastic: { $sum: "$plasticReduced" },
-              },
-            },
-          ])
+          .aggregate([{ $group: { _id: null, totalChallenges: { $sum: 1 } } }])
           .toArray();
-
-        const result = stats[0] || { totalCO2: 0, totalPlastic: 0 };
-
-        res.json({
-          message: "Live statistics fetched successfully",
-          totalCO2: result.totalCO2,
-          totalPlastic: result.totalPlastic,
-        });
-      } catch (error) {
-        console.error("Error fetching statistics:", error);
+        res.json(stats[0] || { totalChallenges: 0 });
+      } catch (err) {
         res.status(500).json({ message: "Server error" });
       }
     });
+
     //  POST API — Finish a Challenge
     app.post("/api/finish-challenge", async (req, res) => {
       console.log("hit finsh");
@@ -614,8 +669,6 @@ async function run() {
           challengeId,
           challengeTitle: challenge.title,
           category: challenge.category,
-          co2Saved: challenge.targetCO2 || 0, // যদি তোমার challenge model এ থাকে
-          plasticReduced: challenge.targetPlastic || 0,
           finishedAt: new Date(),
         });
 
