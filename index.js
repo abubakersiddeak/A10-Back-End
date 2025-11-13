@@ -8,7 +8,7 @@ import serviceAccount from "./firebase-adminsdk.json" with { type: "json" };
 dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 4000;
-
+console.log(serviceAccount);
 // firebase
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
