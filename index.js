@@ -8,7 +8,7 @@ import serviceAccount from "./firebase-adminsdk.json" with { type: "json" };
 dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 4000;
-console.log(serviceAccount);
+
 // firebase
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -216,23 +216,66 @@ async function run() {
     }); // in use
 
     // Update a challenge
-    app.patch("/api/challenges/:id", async (req, res) => {
-      const id = req.params.id;
-      const updated = req.body;
-      updated.updatedAt = new Date();
-      const result = await challenges.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: updated }
-      );
-      res.json(result);
-    });
+
+    app.patch("/api/challenges/:id", verifyFirebaseToken, async (req, res) => {
+      try {
+        const challengeId = req.params.id;
+        const updated = req.body;
+        const userEmail = req.user?.email;
+
+        // Prevent updating _id or createdBy
+        delete updated._id;
+        delete updated.createdBy;
+
+        // Add updatedAt
+        updated.updatedAt = new Date();
+
+        // Check if the challenge exists and belongs to current user
+        const challenge = await challenges.findOne({
+          _id: new ObjectId(challengeId),
+        });
+
+        if (challenge.createdBy !== userEmail)
+          return res
+            .status(403)
+            .json({ message: "You are not allowed to edit this challenge" });
+
+        // Update document
+        const result = await challenges.updateOne(
+          { _id: new ObjectId(challengeId) },
+          { $set: updated }
+        );
+
+        // Return updated document
+        const updatedChallenge = await challenges.findOne({
+          _id: new ObjectId(challengeId),
+        });
+
+        res.json(updatedChallenge);
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Failed to update challenge" });
+      }
+    }); //in use
 
     // Delete a challenge
     app.delete("/api/challenges/:id", verifyFirebaseToken, async (req, res) => {
       const id = req.params.id;
+      const tokenEmail = req.user?.email;
+      const challenge = await challenges.findOne({ _id: new ObjectId(id) });
+      if (!challenge) {
+        return res.status(404).json({ message: "Challenge not found" });
+      }
+
+      if (challenge.createdBy !== tokenEmail) {
+        return res
+          .status(403)
+          .json({ message: "Forbidden - You cannot delete this challenge" });
+      }
+
       const result = await challenges.deleteOne({ _id: new ObjectId(id) });
       res.json(result);
-    });
+    }); // in use
 
     // Join challenge (increments participants + adds to UserChallenges)
     app.post(
@@ -301,7 +344,12 @@ async function run() {
     app.get("/api/tips/:author", verifyFirebaseToken, async (req, res) => {
       try {
         const author = req.params.author;
-
+        const tokenEmail = req.user?.email;
+        if (author !== tokenEmail) {
+          return res.status(403).json({
+            message: "Forbidden - You cannot access other users' tips",
+          });
+        }
         const result = await tips.find({ author: author }).toArray();
 
         res.status(200).json(result);
@@ -320,8 +368,20 @@ async function run() {
     }); // in use
     app.put("/api/tips/:id", verifyFirebaseToken, async (req, res) => {
       try {
+        const veryfyEmail = req.user.email;
         const id = req.params.id;
         const { title, category, content } = req.body;
+
+        const data = await tips.findOne({ _id: new ObjectId(id) });
+        if (!data) {
+          return res.send("tips not found");
+        }
+
+        if (data.author !== veryfyEmail) {
+          return res
+            .status(403)
+            .json({ message: "Forbidden - You dont have access " });
+        }
 
         if (!title || !category || !content) {
           return res.status(400).json({ message: "All fields are required" });
@@ -349,7 +409,7 @@ async function run() {
         console.error("PUT /api/tips/:id error:", error);
         res.status(500).json({ message: "Server error during update" });
       }
-    });
+    }); //in use
     //  Upvote a tip
     app.put("/api/tips/:id/upvote", verifyFirebaseToken, async (req, res) => {
       try {
@@ -361,14 +421,12 @@ async function run() {
           return res.status(404).json({ message: "Tip not found" });
         }
 
-        // নিজের পোস্টে ভোট দেওয়া বন্ধ
         if (tip.author === userEmail) {
           return res
             .status(400)
             .json({ message: "You can't upvote your own tip" });
         }
 
-        // 🔍 upvotedUsers ফিল্ড না থাকলে initialize করে দাও
         if (!Array.isArray(tip.upvotedUsers)) {
           tip.upvotedUsers = [];
         }
@@ -376,7 +434,6 @@ async function run() {
         const alreadyVoted = tip.upvotedUsers.includes(userEmail);
 
         if (alreadyVoted) {
-          // 🟡 যদি আগে ভোট দিয়ে থাকে → Vote cancel
           await tips.updateOne(
             { _id: new ObjectId(id) },
             {
@@ -404,7 +461,20 @@ async function run() {
     app.delete("/api/tips/:id", verifyFirebaseToken, async (req, res) => {
       try {
         const id = req.params.id;
-        console.log(id);
+        const firebaseEmile = req.user.email;
+        const tipsdata = await tips.findOne({
+          _id: new ObjectId(id),
+        });
+        if (!tipsdata) {
+          return res.status(404).json({ message: "Tip not found" });
+        }
+
+        if (tipsdata.author !== firebaseEmile) {
+          return res.status(403).json({
+            message: "Forbidden - You cannot delete other users' tips",
+          });
+        }
+
         const result = await tips.deleteOne({
           _id: new ObjectId(id),
         });
@@ -450,7 +520,30 @@ async function run() {
       const result = await events.insertOne(data);
       res.json(result);
     }); //in use
+    app.get("/api/global-stats", async (req, res) => {
+      try {
+        const totalUsers = await users.countDocuments();
+        const totalJoined = await userChallenges.countDocuments();
+        const totalCompleted = await userChallenges.countDocuments({
+          status: "completed",
+        });
+
+        res.json({
+          success: true,
+          stats: {
+            totalUsers,
+            totalJoined,
+            totalCompleted,
+          },
+        });
+      } catch (error) {
+        console.error("Error fetching global stats:", error);
+        res.status(500).json({ success: false, message: "Server Error" });
+      }
+    }); //in use
+
     app.get("/api/total-joined", async (req, res) => {
+      console.log("hit total join");
       try {
         const totalJoins = await userChallenges.countDocuments({});
         res.json({ totalJoined: totalJoins });
@@ -469,42 +562,58 @@ async function run() {
       res.json(result);
     });
 
-    app.get("/api/user-challenges/:userId", async (req, res) => {
-      try {
-        const userId = req.params.userId;
+    app.get(
+      "/api/user-challenges/:userId",
+      verifyFirebaseToken,
+      async (req, res) => {
+        try {
+          const userId = req.params.userId;
+          const firebaseEmail = req.user.email;
 
-        //  userChallenges fetch
-        const userChallengesData = await userChallenges
-          .find({ userId })
-          .toArray();
+          const user = await users.findOne({ _id: new ObjectId(userId) });
+          console.log(user);
 
-        // challenge details fetch
-        const challengesDetails = await Promise.all(
-          userChallengesData.map(async (uc) => {
-            const challengeData = await challenges.findOne({
-              _id: new ObjectId(uc.challengeId),
-            });
+          if (user.email !== firebaseEmail) {
+            return res
+              .status(403)
+              .json({ message: "Forbidden - You cannot access other data" });
+          }
 
-            return {
-              ...uc,
-              challenge: challengeData || null,
-            };
-          })
-        );
+          //  userChallenges fetch
+          const userChallengesData = await userChallenges
+            .find({ userId })
+            .toArray();
 
-        res.json(challengesDetails);
-        console.log(challengesDetails);
-      } catch (error) {
-        console.error("Error fetching user challenges with details:", error);
-        res.status(500).json({ message: "Server error" });
+          // challenge details fetch
+          const challengesDetails = await Promise.all(
+            userChallengesData.map(async (uc) => {
+              const challengeData = await challenges.findOne({
+                _id: new ObjectId(uc.challengeId),
+              });
+
+              console.log(challengeData);
+
+              return {
+                ...uc,
+                challenge: challengeData || null,
+              };
+            })
+          );
+
+          res.json(challengesDetails);
+        } catch (error) {
+          console.error("Error fetching user challenges with details:", error);
+          res.status(500).json({ message: "Server error" });
+        }
       }
-    });
+    ); // in use
 
     // Update user challenge progress
     app.patch(
       "/api/user-challenges/update/:id",
       verifyFirebaseToken,
       async (req, res) => {
+        console.log("in use");
         try {
           const id = req.params.id;
           const {
@@ -523,7 +632,7 @@ async function run() {
               .status(404)
               .json({ message: "User challenge not found" });
           }
-
+          console.log(existing);
           // calculate new progress and impact
           const newActionsCompleted =
             existing.actionsCompleted + (actionsCompleted || 0);
@@ -614,21 +723,8 @@ async function run() {
       }
     }); // in use
 
-    // --- Live stats API ---
-    app.get("/api/liveStats", async (req, res) => {
-      try {
-        const stats = await livestatics
-          .aggregate([{ $group: { _id: null, totalChallenges: { $sum: 1 } } }])
-          .toArray();
-        res.json(stats[0] || { totalChallenges: 0 });
-      } catch (err) {
-        res.status(500).json({ message: "Server error" });
-      }
-    });
-
     //  POST API — Finish a Challenge
     app.post("/api/finish-challenge", async (req, res) => {
-      console.log("hit finsh");
       try {
         const { userId, challengeId, email } = req.body;
 
@@ -647,7 +743,7 @@ async function run() {
         if (!challenge) {
           return res.status(404).json({ message: "Challenge not found!" });
         }
-        console.log(challenge);
+
         // Step 3: Save data in 'livestatics' collection
         await livestatics.insertOne({
           email,
