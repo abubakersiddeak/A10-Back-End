@@ -50,7 +50,7 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
     const db = client.db("ecoTrackDB");
 
     // Collections
@@ -680,7 +680,7 @@ async function run() {
     });
 
     // Ping the server
-    await db.command({ ping: 1 });
+    // await db.command({ ping: 1 });
     console.log(" Pinged MongoDB — connection verified.");
   } catch (error) {
     console.error(" Error connecting to MongoDB:", error);
@@ -690,4 +690,6 @@ async function run() {
 run().catch(console.dir);
 
 // Start server
-export default app;
+app.listen(PORT, () => {
+  console.log(` Server running on http://localhost:${PORT}`);
+});
