@@ -7,7 +7,7 @@ import serviceAccount from "./firebase-adminsdk.json" with { type: "json" };
 
 dotenv.config();
 const app = express();
-const port = process.env.PORT || 4000;
+const PORT = process.env.PORT || 4000;
 
 // firebase
 admin.initializeApp({
@@ -690,6 +690,6 @@ async function run() {
 run().catch(console.dir);
 
 // Start server
-app.listen(port, () => {
-  console.log(` Server running on http://localhost:${port}`);
+app.listen(PORT, () => {
+  console.log(` Server running on http://localhost:${PORT}`);
 });
