@@ -558,75 +558,61 @@ async function run() {
         }
       }
     );
-    app.patch(
-      "/api/user-challenges/:id/complete-step",
-      verifyFirebaseToken,
-      async (req, res) => {
-        const { id } = req.params;
-        const { stepId, co2PerAction = 0, plasticPerAction = 0 } = req.body;
+    app.patch("/api/user-challenges/:id/complete-step", async (req, res) => {
+      try {
+        const userChallengeId = req.params.id;
+        const { stepId } = req.body;
 
-        try {
-          const uc = await userChallenges.findOne({ _id: new ObjectId(id) });
-          if (!uc)
-            return res
-              .status(404)
-              .json({ message: "User challenge not found" });
+        const userChallenge = await userChallenges.findOne({
+          _id: new ObjectId(userChallengeId),
+        });
+        if (!userChallenge)
+          return res.status(404).json({ message: "User challenge not found" });
 
-          const completedSteps = Array.isArray(uc.completedSteps)
-            ? uc.completedSteps
-            : [];
-          if (completedSteps.includes(stepId)) {
-            return res.status(400).json({ message: "Step already completed" });
+        // Update completed steps
+        const completedSteps = userChallenge.completedSteps || [];
+        if (!completedSteps.includes(stepId)) completedSteps.push(stepId);
+
+        // Calculate progress
+        const progress = Math.floor(
+          (completedSteps.length / userChallenge.totalActions) * 100
+        );
+        const status = progress >= 100 ? "completed" : "active";
+
+        await userChallenges.updateOne(
+          { _id: new ObjectId(userChallengeId) },
+          {
+            $set: { completedSteps, progress, status, lastUpdated: new Date() },
           }
+        );
 
-          completedSteps.push(stepId);
-
-          const totalSteps = uc.totalActions || 1;
-          const newProgress = Math.min(
-            (completedSteps.length / totalSteps) * 100,
-            100
-          );
-          const newStatus = newProgress >= 100 ? "Completed" : "In Progress";
-
-          // Update user challenge
-          await userChallenges.updateOne(
-            { _id: new ObjectId(id) },
-            {
-              $set: {
-                completedSteps,
-                progress: newProgress,
-                status: newStatus,
-                lastUpdated: new Date(),
-              },
-              $inc: {
-                co2Saved: co2PerAction,
-                plasticReduced: plasticPerAction,
-              },
-            }
-          );
-
-          // If completed → insert to livestatics
-          if (newProgress >= 100) {
+        // If finished, create livestatics entry
+        if (progress >= 100) {
+          const challenge = await challenges.findOne({
+            _id: new ObjectId(userChallenge.challengeId),
+          });
+          if (challenge) {
             await livestatics.insertOne({
-              email: req.user.email,
-              userId: uc.userId,
-              challengeId: uc.challengeId,
-              challengeTitle: uc.challengeTitle,
-              category: uc.category,
+              email: userChallenge.email,
+              userId: userChallenge.userId,
+              challengeId: challenge._id,
+              challengeTitle: challenge.title,
+              category: challenge.category,
               finishedAt: new Date(),
             });
           }
-
-          const updated = await userChallenges.findOne({
-            _id: new ObjectId(id),
-          });
-          res.json(updated);
-        } catch (err) {
-          console.error(err);
-          res.status(500).json({ message: "Server error" });
         }
+
+        // Return updated userChallenge
+        const updatedChallenge = await userChallenges.findOne({
+          _id: new ObjectId(userChallengeId),
+        });
+        res.status(200).json(updatedChallenge);
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error while updating step" });
       }
-    );
+    }); // in use
 
     // --- Live stats API ---
     app.get("/api/liveStats", async (req, res) => {
