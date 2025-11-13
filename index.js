@@ -690,6 +690,4 @@ async function run() {
 run().catch(console.dir);
 
 // Start server
-app.listen(PORT, () => {
-  console.log(` Server running on http://localhost:${PORT}`);
-});
+export default app;
